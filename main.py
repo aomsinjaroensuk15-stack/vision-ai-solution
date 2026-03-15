@@ -7,17 +7,17 @@ import google.generativeai as genai
 
 app = FastAPI()
 
-# เชื่อมต่อกุญแจ Gemini ที่คุณใส่ใน Render ไว้
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+# เชื่อมต่อกุญแจ
+api_key = os.getenv("GEMINI_API_KEY")
+genai.configure(api_key=api_key)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
-# เชื่อมต่อกับ LINE
 line_bot_api = LineBotApi(os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
 handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
 
 @app.get("/")
 def root():
-    return {"message": "Vision AI Brain is Online!"}
+    return {"status": "online", "key_loaded": api_key is not None}
 
 @app.post("/callback")
 async def callback(request: Request):
@@ -33,17 +33,12 @@ async def callback(request: Request):
 def handle_message(event):
     user_text = event.message.text
     try:
-        # ส่งข้อความไปให้ Gemini ช่วยคิดคำตอบ
         response = model.generate_content(user_text)
-        ai_answer = response.text
-        
-        # ส่งคำตอบจาก AI กลับไปหาคุณใน LINE
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=ai_answer)
-        )
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=response.text))
     except Exception as e:
+        # บรรทัดนี้จะบอกเราว่า "พังเพราะอะไร" ในหน้า Logs ของ Render ครับ
+        print(f"DEBUG ERROR: {str(e)}")
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="ขออภัยครับ สมองขัดข้องนิดหน่อย ลองใหม่อีกทีนะ!")
+            TextSendMessage(text=f"สมองขัดข้อง: {str(e)[:50]}...")
         )
