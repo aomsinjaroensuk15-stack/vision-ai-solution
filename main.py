@@ -1,18 +1,23 @@
+import os
 from fastapi import FastAPI, Request, HTTPException
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import os
+import google.generativeai as genai
 
 app = FastAPI()
 
-# ดึงค่าจาก Environment Variables เพื่อความปลอดภัย
+# เชื่อมต่อกุญแจ Gemini ที่เราใส่ใน Render ไว้
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+model = genai.GenerativeModel('gemini-1.5-flash')
+
+# เชื่อมต่อ LINE
 line_bot_api = LineBotApi(os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
 handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
 
 @app.get("/")
 def root():
-    return {"message": "Vision AI Solution is Online!"}
+    return {"message": "Vision AI Brain is Online!"}
 
 @app.post("/callback")
 async def callback(request: Request):
@@ -27,6 +32,18 @@ async def callback(request: Request):
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_text = event.message.text
-    # ตอบกลับเบื้องต้นก่อน
-    reply_text = f"Vision AI ได้รับข้อความ: '{user_text}' แล้วครับ!" 
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+    try:
+        # ส่งข้อความจาก LINE ไปให้ Gemini คิดคำตอบ
+        response = model.generate_content(user_text)
+        ai_answer = response.text
+        
+        # ส่งคำตอบจาก AI กลับไปหาผู้ใช้
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=ai_answer)
+        )
+    except Exception as e:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="ขออภัยครับ สมองขัดข้องนิดหน่อย ลองทักใหม่อีกทีนะ!")
+        )
