@@ -7,11 +7,11 @@ import google.generativeai as genai
 
 app = FastAPI()
 
-# เชื่อมต่อกุญแจ Gemini ที่เราใส่ใน Render ไว้
+# เชื่อมต่อกุญแจ Gemini ที่คุณใส่ใน Render ไว้
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 model = genai.GenerativeModel('gemini-1.5-flash')
 
-# เชื่อมต่อ LINE
+# เชื่อมต่อกับ LINE
 line_bot_api = LineBotApi(os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
 handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
 
@@ -33,11 +33,11 @@ async def callback(request: Request):
 def handle_message(event):
     user_text = event.message.text
     try:
-        # ส่งข้อความจาก LINE ไปให้ Gemini คิดคำตอบ
+        # ส่งข้อความไปให้ Gemini ช่วยคิดคำตอบ
         response = model.generate_content(user_text)
         ai_answer = response.text
         
-        # ส่งคำตอบจาก AI กลับไปหาผู้ใช้
+        # ส่งคำตอบจาก AI กลับไปหาคุณใน LINE
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text=ai_answer)
@@ -45,5 +45,5 @@ def handle_message(event):
     except Exception as e:
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="ขออภัยครับ สมองขัดข้องนิดหน่อย ลองทักใหม่อีกทีนะ!")
+            TextSendMessage(text="ขออภัยครับ สมองขัดข้องนิดหน่อย ลองใหม่อีกทีนะ!")
         )
