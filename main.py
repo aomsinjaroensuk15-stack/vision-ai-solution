@@ -38,7 +38,7 @@ def handle_message(event):
                 {"role": "system", "content": "คุณคือ Synapse AI ผู้ช่วยอัจฉริยะ ตอบคำถามอย่างชาญฉลาด กระชับ และเป็นกันเอง"},
                 {"role": "user", "content": user_text}
             ],
-            model="llama3-70b-8192",
+            model="llama-3.3-70b-versatile",
         )
         response_text = chat_completion.choices[0].message.content
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=response_text))
