@@ -31,7 +31,31 @@ def callback():
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_text = event.message.text
+    
+    # ถ้ากดปุ่ม "ระดมสมอง"
+    if user_text == "[โหมดระดมสมอง]":
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="🧠 เข้าสู่โหมดระดมสมอง! อยากให้ช่วยคิดไอเดียอะไร บอกมาได้เลยครับ"))
+        return 
+
+    # ถ้ากดปุ่ม "แชทหลัก"
+    elif user_text == "[โหมดแชทหลัก]":
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="💬 กลับสู่โหมดแชทหลักแล้วครับ คุยกับผมได้ตามปกติเลย!"))
+        return 
+
+    # ถ้าพิมพ์ข้อความคุยปกติ (ส่งไปถาม AI)
     try:
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": "คุณคือ Synapse AI ผู้ช่วยอัจฉริยะ"},
+                {"role": "user", "content": user_text}
+            ],
+            model="llama-3.3-70b-versatile",
+        )
+        response_text = chat_completion.choices[0].message.content
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=response_text))
+    except Exception as e:
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="ขออภัย ระบบขัดข้องครับ"))
+
         # สั่งให้ Groq คิดหาคำตอบ (ใช้ Llama 3 70B ตัวแรง)
         chat_completion = client.chat.completions.create(
             messages=[
