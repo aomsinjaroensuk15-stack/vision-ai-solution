@@ -3,5 +3,5 @@ line-bot-sdk
 groq
 pymupdf
 supabase
-axiom-eth
 pillow
+httpx
