@@ -1,3 +1,78 @@
+Skip to content
+aomsinjaroensuk15-stack
+vision-ai-solution
+Repository navigation
+Code
+Issues
+Pull requests
+Actions
+Projects
+Wiki
+Security
+Insights
+Settings
+Files
+Go to file
+t
+Procfile
+README.md
+main.py
+requirements.txt
+vision-ai-solution
+/
+main.py
+in
+main
+
+Edit
+
+Preview
+Indent mode
+
+Spaces
+Indent size
+
+4
+Line wrap mode
+
+No wrap
+Editing main.py file contents
+  1
+  2
+  3
+  4
+  5
+  6
+  7
+  8
+  9
+ 10
+ 11
+ 12
+ 13
+ 14
+ 15
+ 16
+ 17
+ 18
+ 19
+ 20
+ 21
+ 22
+ 23
+ 24
+ 25
+ 26
+ 27
+ 28
+ 29
+ 30
+ 31
+ 32
+ 33
+ 34
+ 35
+ 36
 import os
 import base64
 import fitz  # PyMuPDF
@@ -34,94 +109,4 @@ def callback():
         handler.handle(body, signature)
     except InvalidSignatureError:
         abort(400)
-    return 'OK'
-
-# --- 1. ระบบจัดการข้อความ (Text) ---
-@handler.add(MessageEvent, message=TextMessage)
-def handle_text(event):
-    user_id = event.source.user_id
-    user_text = event.message.text
-    history = get_chat_history(user_id)
-    
-    history.append({"role": "user", "content": user_text})
-    if len(history) > 11: history = [history[0]] + history[-10:] # เก็บความจำ 10 ประโยคล่าสุด
-    
-    try:
-        completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=history
-        )
-        ai_response = completion.choices[0].message.content
-        history.append({"role": "assistant", "content": ai_response})
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
-    except Exception as e:
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="ขออภัยครับ สมองเบลอนิดหน่อย ลองใหม่นะ!"))
-
-# --- 2. ระบบจัดการรูปภาพ (Vision - แก้ปัญหาตามองไม่เห็น) ---
-@handler.add(MessageEvent, message=ImageMessage)
-def handle_image(event):
-    try:
-        # รับรูปจาก LINE
-        message_content = line_bot_api.get_message_content(event.message.id)
-        base64_image = base64.b64encode(message_content.content).decode('utf-8')
-        
-        # ส่งให้โมเดล Vision ตัวใหญ่ที่สุด (90B)
-        response = client.chat.completions.create(
-            model="llama-3.2-90b-vision-preview",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "ช่วยวิเคราะห์รูปนี้อย่างละเอียด หรือสรุปข้อความในรูปให้ทีครับ?"},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
-                        }
-                    ]
-                }
-            ]
-        )
-        reply_text = response.choices[0].message.content
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-    except Exception as e:
-        # ถ้ายังพลาด จะแจ้ง Error สั้นๆ เพื่อให้เรารู้สาเหตุ
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"ดวงตามีปัญหาเล็กน้อยครับ: {str(e)[:50]}"))
-
-# --- 3. ระบบจัดการ PDF (File) ---
-@handler.add(MessageEvent, message=FileMessage)
-def handle_file(event):
-    file_name = event.message.file_name
-    if file_name.lower().endswith('.pdf'):
-        message_content = line_bot_api.get_message_content(event.message.id)
-        temp_path = f"temp_{event.message.id}.pdf"
-        
-        with open(temp_path, "wb") as f:
-            f.write(message_content.content)
-        
-        try:
-            doc = fitz.open(temp_path)
-            text = "".join([page.get_text() for page in doc])
-            doc.close()
-            os.remove(temp_path)
-            
-            # สรุปเนื้อหาแบบ Step-by-Step
-            prompt = f"สรุปเนื้อหาจากไฟล์ {file_name} นี้เป็น 3 หัวใจสำคัญ และตั้งคำถามทดสอบ 3 ข้อ:\n\n{text[:4000]}"
-            completion = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": prompt}]
-            )
-            summary = completion.choices[0].message.content
-
-            # ส่งเป็น Flex Message สีดำหรูหรา
-            flex_content = {
-                "type": "bubble",
-                "header": {"type": "box", "layout": "vertical", "contents": [{"type": "text", "text": "💎 VISION SUMMARY", "weight": "bold", "color": "#FFFFFF"}], "backgroundColor": "#000000"},
-                "body": {"type": "box", "layout": "vertical", "contents": [{"type": "text", "text": file_name, "weight": "bold", "size": "lg"}, {"type": "text", "text": summary, "wrap": True, "size": "sm", "margin": "md"}]},
-                "footer": {"type": "box", "layout": "vertical", "contents": [{"type": "button", "action": {"type": "message", "label": "📝 เริ่มทำแบบทดสอบ", "text": "ขอแบบทดสอบจากไฟล์นี้ที!"}, "style": "primary", "color": "#000000"}]}
-            }
-            line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="PDF Summary", contents=flex_content))
-        except Exception as e:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="อ่าน PDF ไม่สำเร็จครับ"))
-
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=10000)
+Use Control + Shift + m to toggle the tab key moving focus. Alternatively, use esc then tab to move to the next interactive element on the page.
