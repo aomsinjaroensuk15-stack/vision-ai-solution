@@ -1,85 +1,93 @@
-import os, base64, hashlib
+import os
+import requests
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
+from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage, ImageMessage
-from groq import Groq
-from supabase import create_client
+import google.generativeai as genai
 
 app = Flask(__name__)
 
-# --- [CONFIG] ---
-line_bot_api = LineBotApi(os.environ.get('LINE_CHANNEL_ACCESS_TOKEN'))
-handler = WebhookHandler(os.environ.get('LINE_CHANNEL_SECRET'))
-groq_client = Groq(api_key=os.environ.get('GROQ_API_KEY'))
-supabase = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
+# --- 1. การตั้งค่าระบบ (Configuration) ---
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
+LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
+VESPA_URL = os.environ.get('VESPA_URL') # URL จาก Ngrok
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
-# ฟังก์ชันสร้างพิกัดเสถียร
-def get_stable_vector(text):
-    h = hashlib.sha256(text.encode()).digest()
-    return [float((h[i % len(h)] / 255.0) * 2 - 1) for i in range(1024)]
+line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
+handler = WebhookHandler(LINE_CHANNEL_SECRET)
+model = genai.GenerativeModel('gemini-1.5-flash')
+
+# --- 2. ฟังก์ชันสมองส่วนความจำ (Vespa Functions) ---
+
+def save_to_vespa(user_id, text_content):
+    """บันทึกความจำลง Vespa"""
+    try:
+        # จำลองค่า Embedding (ในอนาคตควรใช้ model.embed_content)
+        dummy_embedding = [0.1] * 1024 
+        url = f"{VESPA_URL}/document/v1/memory/memory/docid/{user_id}_{os.urandom(4).hex()}"
+        data = {
+            "fields": {
+                "user_id": user_id,
+                "content": text_content,
+                "embedding": {"values": dummy_embedding}
+            }
+        }
+        requests.post(url, json=data)
+    except Exception as e:
+        print(f"Vespa Save Error: {e}")
+
+def get_memory(user_id, query):
+    """ดึงความจำที่เกี่ยวข้องจาก Vespa"""
+    try:
+        url = f"{VESPA_URL}/search/"
+        yql = f"select content from memory where user_id contains '{user_id}'"
+        params = {
+            "yql": yql,
+            "hits": 3,
+            "ranking": "default"
+        }
+        res = requests.get(url, params=params).json()
+        hits = res.get('root', {}).get('children', [])
+        memories = [h['fields']['content'] for h in hits if 'fields' in h]
+        return "\n".join(memories)
+    except:
+        return ""
+
+# --- 3. จุดรับสัญญาณ (Webhook & Handlers) ---
 
 @app.route("/callback", methods=['POST'])
 def callback():
-    signature = request.headers.get('X-Line-Signature')
+    signature = request.headers['X-Line-Signature']
     body = request.get_data(as_text=True)
     try:
         handler.handle(body, signature)
-    except Exception as e:
-        print(f"Error in callback: {e}")
+    except InvalidSignatureError:
         abort(400)
     return 'OK'
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text(event):
     user_id = event.source.user_id
-    user_text = event.message.text
-    try:
-        current_vec = get_stable_vector(user_text)
-        # ดึงความจำ
-        memories = supabase.rpc("match_memories", {
-            "query_embedding": current_vec, "match_threshold": 0.2, "match_count": 3, "p_user_id": user_id
-        }).execute()
-        context = "\n".join([m['content'] for m in memories.data]) if memories.data else "ไม่มีข้อมูลเก่า"
+    user_msg = event.message.text
 
-        # AI Response
-        response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": f"คุณคือ Sovereign AI ข้อมูลในอดีต: {context}"},
-                {"role": "user", "content": user_text}
-            ]
-        )
-        # บันทึกความจำ
-        supabase.table("long_term_memory").insert({"user_id": user_id, "content": user_text, "embedding": current_vec}).execute()
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=response.choices[0].message.content))
-    except Exception as e:
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"🧠 Memory Error: {str(e)[:50]}"))
+    # STEP A: ระลึกชาติ (ดึงความจำเก่าจาก Vespa)
+    past_memories = get_memory(user_id, user_msg)
+    
+    # STEP B: ปรุงคำตอบด้วย Gemini
+    prompt = f"""คุณคือ Sovereign AI (Vision AI Solution) ผู้ช่วยที่ชาญฉลาด
+    ข้อมูลความจำในอดีตของผู้ใช้: {past_memories}
+    คำถามปัจจุบัน: {user_msg}
+    จงตอบคำถามโดยใช้ความจำที่มี ถ้าไม่มีให้ตอบตามความเหมาะสม"""
+    
+    response = model.generate_content(prompt)
+    bot_reply = response.text
 
-@handler.add(MessageEvent, message=ImageMessage)
-def handle_image(event):
-    try:
-        # 📸 ดึงรูปจาก LINE
-        message_content = line_bot_api.get_message_content(event.message.id)
-        # แปลงเป็น Base64
-        image_data = base64.b64encode(message_content.content).decode('utf-8')
-        
-        # ส่งให้ Vision Model
-        response = groq_client.chat.completions.create(
-            model="llama-3.2-11b-vision-preview",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "วิเคราะห์รูปนี้อย่างละเอียดในฐานะผู้ช่วยอัจฉริยะ"},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}}
-                    ]
-                }
-            ]
-        )
-        ans = response.choices[0].message.content
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"👁️ Vision Analysis:\n{ans}"))
-    except Exception as e:
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"📸 Vision Error: {str(e)[:50]}"))
+    # STEP C: บันทึกความจำใหม่ลง Vespa
+    save_to_vespa(user_id, user_msg)
+    save_to_vespa(user_id, bot_reply)
+
+    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=bot_reply))
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=10000)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
